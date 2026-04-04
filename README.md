@@ -12,6 +12,28 @@ Backend: **FastAPI + Celery + Redis**. Frontend: **Next.js + Tailwind + shadcn/u
 
 ---
 
+## Architecture overview
+
+**High-level components**
+
+- **Next.js frontend**: upload UI → converts file to Base64 → calls backend API.
+- **FastAPI backend**: validates API key, receives request, queues a Celery task, and returns the computed result.
+- **Celery worker**: does the CPU-heavy work (text extraction + AI analysis).
+- **Redis**: message broker + result backend for Celery.
+
+**Request flow**
+
+1. User uploads a document in the browser.
+2. Frontend converts the file to Base64 and sends `POST /api/document-analyze` with `x-api-key`.
+3. Backend enqueues a Celery job in Redis.
+4. Worker processes the job:
+   - Extracts text (PDF/DOCX/OCR)
+   - Runs AI summarization + sentiment
+   - Extracts entities + amounts
+5. Worker returns the output via Redis and the API responds with a JSON payload.
+
+---
+
 ## Repository structure (submission layout)
 
 ```
@@ -58,6 +80,27 @@ requirements.txt
 
 - `docker-compose` (services: `redis`, `api`, `worker`)
 - `Dockerfile` (includes OCR dependencies and Python deps)
+
+---
+
+## AI tools used
+
+### Runtime AI (in the application)
+
+This project uses **local (on-device) Hugging Face transformer models** via the `transformers` library:
+
+- **Summarization**: `sshleifer/distilbart-cnn-12-6` (with chunking + fallback)
+- **Sentiment**: `distilbert-base-uncased-finetuned-sst-2-english`
+
+NER / entities are extracted with:
+
+- **spaCy**: `en_core_web_sm`
+
+> Note: Invoice-like documents are detected heuristically and summarized using a structured template to produce more useful “invoice-style” summaries.
+
+### AI-assisted development
+
+During development, **GitHub Copilot** was used to speed up implementation, refactoring, and documentation (e.g., generating boilerplate and suggesting improvements). The deployed app itself runs locally using the models listed above.
 
 ---
 
@@ -133,7 +176,9 @@ Response (success):
 
 ---
 
-## Configuration
+## Setup instructions
+
+### 1) Configure environment
 
 Create a local `.env` from `.env.example`.
 
@@ -144,66 +189,39 @@ Important vars:
 - `CORS_ORIGINS` (comma-separated)
 - `NEXT_PUBLIC_API_BASE_URL` (frontend → backend URL)
 
----
+### 2) Run locally (no Docker)
 
-## Run locally (no Docker)
+Backend:
 
-### Backend
+1. Install deps: `pip install -r requirements.txt`
+2. Start Redis (locally, or via Docker)
+3. Run API: `uvicorn src.main:app --host 0.0.0.0 --port 8000`
+4. Run worker (separate terminal): `celery -A src.tasks.celery_app.celery_app worker --loglevel=INFO`
 
-1. Copy env:
-   - Create `.env` from `.env.example` and set `API_KEY`.
-2. Install deps:
-   - `pip install -r requirements.txt`
-3. Start Redis (locally, or via Docker).
-4. Run API:
-   - `uvicorn src.main:app --host 0.0.0.0 --port 8000`
-5. Run worker (separate terminal):
-   - `celery -A src.tasks.celery_app.celery_app worker --loglevel=INFO`
+Frontend:
 
-### Frontend
-
-1. In `frontend/`, create `.env.local` (or set env in your shell):
+1. In `frontend/`, create `.env.local`:
    - `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000`
 2. Install deps and run dev server.
 
----
-
-## Run with Docker (recommended)
-
-This brings up `redis`, `api`, and `worker`:
+### 3) Run with Docker (recommended)
 
 - Ensure `.env` exists in repo root.
-- Start with `docker-compose.yml`.
+- Start `redis`, `api`, and `worker` using `docker-compose.yml`.
 
 ---
 
-## Deployment (one practical path)
+## Known limitations
 
-### Backend
-
-Deploy the **FastAPI API + Celery worker + Redis** together (same VPC/network) using any container host:
-
-- Render / Railway / Fly.io / Azure Container Apps / EC2
-- Use one Redis instance (managed or container)
-- Run **two processes** from the same image:
-  - API: `uvicorn src.main:app --host 0.0.0.0 --port 8000`
-  - Worker: `celery -A src.tasks.celery_app.celery_app worker --loglevel=INFO`
-
-Set environment variables on the platform:
-
-- `API_KEY` (secret)
-- `REDIS_URL`
-- `CORS_ORIGINS` (include your frontend domain)
-
-### Frontend
-
-Deploy `frontend/` on Vercel (or similar) and configure:
-
-- `NEXT_PUBLIC_API_BASE_URL=https://<your-backend-domain>`
+- **Cold start**: first request can be slow while transformer models download/load.
+- **OCR quality** depends heavily on image clarity; low-resolution scans may reduce accuracy.
+- **NER limitations**: `en_core_web_sm` is lightweight and may miss some entities.
+- **Amount extraction** is regex-based; some formats may be missed or misinterpreted.
+- **Large documents** may hit timeouts (the API waits for the Celery result).
+- **Deployment**: for production-grade deployments you’d typically return a job id instead of blocking.
 
 ---
 
 ## Notes
 
-- First run may be slower because transformer models download/load.
 - For best OCR results, upload clear images (high contrast).
