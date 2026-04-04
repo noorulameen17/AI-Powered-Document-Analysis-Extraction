@@ -10,4 +10,3 @@ pillow==11.2.1
 pytesseract==0.3.13
 spacy==3.8.7
 transformers==4.51.3
-torch==2.7.0

@@ -21,11 +21,14 @@ ENV PIP_DEFAULT_TIMEOUT=180 \
 
 COPY requirements.txt ./
 
-# Install Python deps with increased timeout/retries.
-# Install spaCy model via direct wheel URL to avoid CLI download flakiness.
+# Install Python deps.
+# - Use CPU-only torch wheels to dramatically reduce image size.
+# - Install spaCy model via direct wheel URL.
 RUN pip install --upgrade pip setuptools wheel \
+    && pip install --retries 10 --timeout 180 --index-url https://download.pytorch.org/whl/cpu torch==2.7.0 \
     && pip install --retries 10 -r requirements.txt \
-    && pip install --retries 10 --timeout 180 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+    && pip install --retries 10 --timeout 180 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl \
+    && pip cache purge
 
 COPY . .
 
@@ -33,4 +36,5 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use platform-provided PORT when available (Railway)
+CMD ["sh", "-c", "uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
