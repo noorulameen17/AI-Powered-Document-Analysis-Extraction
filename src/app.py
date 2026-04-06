@@ -8,13 +8,21 @@ from .api.routes import router as api_router
 def create_app() -> FastAPI:
     app = FastAPI(title="AI Document Analysis API", version="1.0.0")
 
-    origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+    # Always allow the submitted Vercel frontend (so the deployed demo works even
+    # if the hosting provider doesn't inject CORS_ORIGINS correctly).
+    default_origins = {
+        "https://ai-powered-document-analysis-extrac-psi.vercel.app",
+    }
+
+    env_origins = [o.strip() for o in (settings.CORS_ORIGINS or "").split(",") if o.strip()]
+    origins = sorted(default_origins.union(env_origins))
+
     if origins:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=origins,
-            allow_credentials=True,
-            allow_methods=["*"] ,
+            allow_credentials=False,
+            allow_methods=["*"],
             allow_headers=["*"],
         )
 
